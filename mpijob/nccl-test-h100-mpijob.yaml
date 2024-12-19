@@ -1,0 +1,89 @@
+apiVersion: kubeflow.org/v1
+kind: MPIJob
+metadata:
+  name: nccl-tests-h100
+spec:
+  slotsPerWorker: 8
+  mpiReplicaSpecs:
+    Launcher:
+      replicas: 1
+      template:
+        spec:
+          containers:
+            - image: ghcr.mirrorify.net/coreweave//nccl-tests:12.2.2-cudnn8-devel-ubuntu20.04-nccl2.19.3-1-3e0fbc3
+              name: nccl
+              env:
+                - name: NCCL_IB_TIMEOUT
+                  value: "22"
+                - name: NCCL_IB_RETRY_CNT
+                  value: "13"
+                - name: NCCL_IB_AR_THRESHOLD
+                  value: "0"
+              command: ["/bin/bash", "-c"]
+              args: [
+                  "mpirun \
+                  --allow-run-as-root \
+                  -map-by slot \
+                  -mca pml ob1 \
+                  -mca btl ^openib \
+                  -mca plm_rsh_num_concurrent 300 \
+                  -mca routed_radix 600 \
+                  -mca plm_rsh_no_tree_spawn 1 \
+                  -x NCCL_DEBUG=TRACE \
+                  -x NCCL_IB_TC=106 \
+                  -x NCCL_IB_GTD_INDEX=5 \
+                  -x NCCL_CROSS_NIC=0 \
+                  -x NCCL_SOCKET_IFNAME=eth0 \
+                  -x NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_4,mlx5_5 \
+                  -x NCCL_ALGO=TREE \ 
+                  -np 16 \ 
+                  -bind-to none \
+                  -x LD_LIBRARY_PATH \
+                  -x NCCL_SOCKET_IFNAME=eth0 \
+                  /opt/nccl_tests/build/all_reduce_perf -b 512M -e 8G -f 2 -g 1 \
+                  ",
+                ]
+              resources:
+                limits:
+                  cpu: 2
+                  memory: 4Gi
+              securityContext:
+                capabilities:
+                  add:
+                  - IPC_LOCK
+                  - SYS_PTRACE
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+          volumes:
+            - emptyDir:
+                medium: Memory
+              name: dshm
+    Worker:
+      replicas: 2
+      template:
+        metadata:
+          labels:
+            job: nccl-test
+        spec:
+          containers:
+            - image: ghcr.mirrorify.net/coreweave/nccl-tests:12.2.2-cudnn8-devel-ubuntu20.04-nccl2.19.3-1-3e0fbc3
+              name: nccl
+              resources:
+                limits:
+                  cpu: 16
+                  memory: 32Gi
+                  nvidia.com/gpu: 8
+                  rdma/ib: 1
+              securityContext:
+                capabilities:
+                  add:
+                  - IPC_LOCK
+                  - SYS_PTRACE
+              volumeMounts:
+                - mountPath: /dev/shm
+                  name: dshm
+          volumes:
+            - emptyDir:
+                medium: Memory
+              name: dshm
